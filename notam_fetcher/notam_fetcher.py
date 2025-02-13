@@ -8,6 +8,15 @@ class NotamResponseDict(TypedDict):
     totalPages: int
     items: list[dict[str, Any]]
 
+class NotamFetcherException(Exception):
+    """Base exception for NotamFetcher errors."""
+
+class NotamFetcherUnexpectedError(NotamFetcherException):
+    """Raised when an unexpected error occurs"""
+
+class NotamFetcherRequestError(NotamFetcherException):
+    """Raised when NotamFetcher receives a request exception while fetching from the API"""
+
 class NotamFetcher:
     DOMAIN = "https://external-api.faa.gov/notamapi/v1/notams"
 
@@ -26,11 +35,10 @@ class NotamFetcher:
             radius (float): The location radius criteria. (max:100)
         
         Raises:
-            requests.exceptions.RequestException: If the any of the API request fails
-            requests.exceptions.ConnectionError: If there's a network connectivity issue in any request
-            json.JSONDecodeError: If any response returns invalid JSON
+            NotamFetcherRequestError: If a request error occurs while fetching from the API.
+            NotamFetcherUnexpectedError: If an unexpected error occurs.
         Returns:
-            Notams (List[Notam]): A list of NOTAMs
+            Notams (List[dict[str, Any]]): A list of NOTAM dicts
         """
 
         
@@ -63,9 +71,8 @@ class NotamFetcher:
             dict: JSON response containing NOTAM data
 
         Raises:
-            requests.exceptions.RequestException: If the API request fails
-            requests.exceptions.ConnectionError: If there's a network connectivity issue
-            json.JSONDecodeError: If the response is not valid JSON
+            NotamFetcherRequestError: If a request error occurs while fetching from the API.
+            NotamFetcherUnexpectedError: If an unexpected error occurs.
         """
 
         querystring = {
@@ -76,10 +83,17 @@ class NotamFetcher:
             "pageSize": str(pageSize)
         }
 
-        response = requests.get(
-            self.DOMAIN,
-            headers={"client_id": self.client_id, "client_secret": self.client_secret},
-            params=querystring,
-        )
+        try:
+            response = requests.get(
+                self.DOMAIN,
+                headers={"client_id": self.client_id, "client_secret": self.client_secret},
+                params=querystring,
+            )
 
-        return response.json()
+        except requests.exceptions.RequestException as e:
+            raise NotamFetcherRequestError from e
+
+        try: 
+            return response.json()
+        except requests.exceptions.JSONDecodeError:
+            raise(NotamFetcherUnexpectedError(f"Response from API unexpectedly not JSON. Received text: {response.text} "))
