@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 import os
 import sys
-from typing import Any
+
 
 from notam_fetcher import NotamFetcher
 
@@ -19,7 +19,5 @@ if CLIENT_SECRET is None:
 
 notam_fetcher = NotamFetcher(CLIENT_ID, CLIENT_SECRET)
 
-response: Any = notam_fetcher._fetchNotamsByLatLong(32, -78, 100)  # type: ignore
-if isinstance(response, dict):
-    keys: Any = response.keys()
-    print(keys)
+notams = notam_fetcher.fetchNotamsByLatLong(22, -78, 100)  
+
