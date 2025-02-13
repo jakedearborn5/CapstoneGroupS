@@ -1,3 +1,3 @@
-from .notam_fetcher import NotamFetcher
+from .notam_fetcher import NotamFetcher, NotamResponseDict
 
-__all__ = ["NotamFetcher"]
+__all__ = ["NotamFetcher", "NotamResponseDict"]
