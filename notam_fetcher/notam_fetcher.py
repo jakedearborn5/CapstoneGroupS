@@ -5,18 +5,7 @@ from datetime import datetime
 from typing import Literal, Any, Optional
 from pydantic import BaseModel, Field
 
-
-class NotamFetcherException(Exception):
-    """Base exception for NotamFetcher errors."""
-
-class NotamFetcherUnexpectedError(NotamFetcherException):
-    """Raised when an unexpected error occurs"""
-
-class NotamFetcherRequestError(NotamFetcherException):
-    """Raised when NotamFetcher receives a request exception while fetching from the API"""
-
-class NotamFetcherUnauthenticated(NotamFetcherException):
-    """Raised when cliend_id or client_secret are invalid"""
+from .exceptions import NotamFetcherRequestError, NotamFetcherUnauthenticated, NotamFetcherUnexpectedError
 
 
 
@@ -57,7 +46,6 @@ class CoreNotamData(BaseModel):
 
 class NotamApiItemProperties(BaseModel):
     coreNOTAMData: CoreNotamData
-
 
 
 class ResponseItem(BaseModel):
@@ -101,7 +89,7 @@ class NotamFetcher:
             NotamFetcherRequestError: If a request error occurs while fetching from the API.
             NotamFetcherUnexpectedError: If an unexpected error occurs.
         Returns:
-            Notams (List[dict[str, Any]]): A list of NOTAM dicts
+            Notams (List[Notam]): A list of NOTAMs
         """
         notamItems: list[Notam]= []
 
@@ -127,7 +115,7 @@ class NotamFetcher:
             NotamFetcherRequestError: If a request error occurs while fetching from the API.
             NotamFetcherUnexpectedError: If an unexpected error occurs.
         Returns:
-            Notams (List[dict[str, Any]]): A list of NOTAM dicts
+            Notams (List[Notam]): A list of NOTAMs
         """
         notamItems: list[Notam] = []
 
@@ -154,7 +142,7 @@ class NotamFetcher:
             pageSize (int): The number of NOTAMs per page (max: 1000)
 
         Returns:
-            dict: JSON response containing NOTAM data
+            NotamAPIResponse: A Notam API Response
 
         Raises:
             NotamFetcherRequestError: If a request error occurs while fetching from the API.
@@ -170,15 +158,11 @@ class NotamFetcher:
         }
 
         try:
-            import time
-
-            start = time.time()
             response = requests.get(
                 self.DOMAIN,
                 headers={"client_id": self.client_id, "client_secret": self.client_secret},
                 params=querystring,
             )
-            print(f"Took {time.time()-start} to fetch")
 
         except requests.exceptions.RequestException as e:
             raise NotamFetcherRequestError from e
@@ -188,9 +172,7 @@ class NotamFetcher:
             if data.get("error", "") == "Invalid client id or secret":
                 raise(NotamFetcherUnauthenticated("Invalid client id or secret"))
             
-            start =  time.time()
             valid_response = NotamAPIResponse.model_validate(data)
-            print(f"Took {time.time()-start} to validate")
             return valid_response
         except requests.exceptions.JSONDecodeError:
             raise(NotamFetcherUnexpectedError(f"Response from API unexpectedly not JSON. Received text: {response.text} "))
@@ -206,7 +188,7 @@ class NotamFetcher:
             pageSize (int): The number of NOTAMs per page (max: 1000)
 
         Returns:
-            dict: JSON response containing NOTAM data
+            NotamAPIResponse: A Notam API Response
 
         Raises:
             NotamFetcherRequestError: If a request error occurs while fetching from the API.
