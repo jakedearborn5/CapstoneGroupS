@@ -1,12 +1,10 @@
 import requests
-from typing import TypedDict, Any
+from datetime import datetime
 
-class NotamResponseDict(TypedDict):
-    pageSize: int
-    pageNum: int
-    totalCount: int
-    totalPages: int
-    items: list[dict[str, Any]]
+
+from typing import Literal, Any, Optional
+from pydantic import BaseModel, Field
+
 
 class NotamFetcherException(Exception):
     """Base exception for NotamFetcher errors."""
@@ -21,13 +19,76 @@ class NotamFetcherUnauthenticated(NotamFetcherException):
     """Raised when cliend_id or client_secret are invalid"""
 
 
+
+class NotamTranslationObject(BaseModel):
+    pass
+
+class LocalFormatTranslationObject(NotamTranslationObject):
+    type: Literal["LOCAL_FORMAT"]
+    simpleText: str
+
+class ICAOTranslationObject(NotamTranslationObject):
+    type: Literal["ICAO"]
+    formattedText: str    
+
+    
+class Notam(BaseModel):
+    id: str
+    number: str
+    type: str
+    issued: datetime
+    selectionCode: Optional[str] = Field(default=None)
+    location: str
+    effectiveStart: datetime
+    effectiveEnd: datetime | str
+    text: str
+    classification: str
+    accountId: str
+    lastUpdated: datetime
+    icaoLocation: str
+
+class NotamEvent(BaseModel):
+    scenario: str
+
+class CoreNotamData(BaseModel):
+    notamEvent: NotamEvent
+    notam: Notam
+    notamTranslation: list[ICAOTranslationObject| LocalFormatTranslationObject]
+
+class NotamApiItemProperties(BaseModel):
+    coreNOTAMData: CoreNotamData
+
+
+
+class ResponseItem(BaseModel):
+    pass
+
+class OtherResponseItem(ResponseItem):
+    type: str
+    properties: dict[str, Any]
+    geometry: dict[str, Any] 
+    
+class NotamApiItem(ResponseItem):
+    type: Literal["Feature"]
+    properties: NotamApiItemProperties
+    geometry: dict[str, Any] 
+
+
+class NotamAPIResponse(BaseModel):
+    pageSize: int
+    pageNum: int
+    totalCount: int
+    totalPages: int
+    items: list[NotamApiItem | OtherResponseItem]
+
+
 class NotamFetcher:
     DOMAIN = "https://external-api.faa.gov/notamapi/v1/notams"
 
     def __init__(self, client_id: str, client_secret: str):
         self.client_id = client_id
         self.client_secret = client_secret
-        self._pageSize = 50
+        self._pageSize = 1000
 
     def fetchNotamsByAirportcode(self, airportCode: str):
         """
@@ -42,16 +103,15 @@ class NotamFetcher:
         Returns:
             Notams (List[dict[str, Any]]): A list of NOTAM dicts
         """
-        notamItems: list[dict[str, Any]] = []
+        notamItems: list[Notam]= []
 
         first_page = self._fetchNotamsByAirportCode(airportCode, 1, self._pageSize)
-        totalPages = first_page['totalPages']
 
-        notamItems.extend(first_page['items'])
+        notamItems.extend([item.properties.coreNOTAMData.notam for item in first_page.items if isinstance(item, NotamApiItem)])
 
-        for i in range(2, totalPages+1):
+        for i in range(2, first_page.totalPages+1):
             nextPage = self._fetchNotamsByAirportCode(airportCode, i, self._pageSize)
-            notamItems.extend(nextPage['items'])
+            notamItems.extend([item.properties.coreNOTAMData.notam for item in nextPage.items if isinstance(item, NotamApiItem)])
         return notamItems
     
     def fetchNotamsByLatLong(self, lat: float, long: float, radius: float = 100.0):
@@ -69,21 +129,20 @@ class NotamFetcher:
         Returns:
             Notams (List[dict[str, Any]]): A list of NOTAM dicts
         """
-        notamItems: list[dict[str, Any]] = []
+        notamItems: list[Notam] = []
 
         first_page = self._fetchNotamsByLatLong(lat, long, radius, 1, self._pageSize)
-        totalPages = first_page['totalPages']
 
-        notamItems.extend(first_page['items'])
+        notamItems.extend([item.properties.coreNOTAMData.notam for item in first_page.items if isinstance(item, NotamApiItem)])
 
-        for i in range(2, totalPages+1):
+        for i in range(2, first_page.totalPages+1):
             nextPage = self._fetchNotamsByLatLong(lat, long, radius, i, self._pageSize)
-            notamItems.extend(nextPage['items'])
+            notamItems.extend([item.properties.coreNOTAMData.notam for item in nextPage.items if isinstance(item, NotamApiItem)])
 
 
         return notamItems
     
-    def _fetchNotamsByLatLong(self, lat: float, long: float, radius: float, pageNum: int , pageSize: int=1000) -> NotamResponseDict:
+    def _fetchNotamsByLatLong(self, lat: float, long: float, radius: float, pageNum: int , pageSize: int=1000) -> NotamAPIResponse:
         """
         Fetches a response from the API using latitude and longitude.
 
@@ -111,11 +170,15 @@ class NotamFetcher:
         }
 
         try:
+            import time
+
+            start = time.time()
             response = requests.get(
                 self.DOMAIN,
                 headers={"client_id": self.client_id, "client_secret": self.client_secret},
                 params=querystring,
             )
+            print(f"Took {time.time()-start} to fetch")
 
         except requests.exceptions.RequestException as e:
             raise NotamFetcherRequestError from e
@@ -125,12 +188,15 @@ class NotamFetcher:
             if data.get("error", "") == "Invalid client id or secret":
                 raise(NotamFetcherUnauthenticated("Invalid client id or secret"))
             
-            return data
+            start =  time.time()
+            valid_response = NotamAPIResponse.model_validate(data)
+            print(f"Took {time.time()-start} to validate")
+            return valid_response
         except requests.exceptions.JSONDecodeError:
             raise(NotamFetcherUnexpectedError(f"Response from API unexpectedly not JSON. Received text: {response.text} "))
 
 
-    def _fetchNotamsByAirportCode(self, airportCode: str, pageNum: int , pageSize: int=1000) -> NotamResponseDict:
+    def _fetchNotamsByAirportCode(self, airportCode: str, pageNum: int , pageSize: int=1000) -> NotamAPIResponse:
         """
         Fetches a response from the API using latitude and longitude.
 
@@ -168,6 +234,7 @@ class NotamFetcher:
             if data.get("error", "") == "Invalid client id or secret":
                 raise(NotamFetcherUnauthenticated("Invalid client id or secret"))
             
-            return data
+            
+            return NotamAPIResponse.model_validate(data)
         except requests.exceptions.JSONDecodeError:
             raise(NotamFetcherUnexpectedError(f"Response from API unexpectedly not JSON. Received text: {response.text} "))
