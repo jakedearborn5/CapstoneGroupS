@@ -1,6 +1,7 @@
-from pytest import MonkeyPatch
+from pytest import  MonkeyPatch
 import pytest
 import requests
+from notam_fetcher.exceptions import NotamFetcherValidationError
 from notam_fetcher.notam_fetcher import NotamFetcher
 
 from typing import Any
@@ -12,6 +13,18 @@ class MockResponse:
 
     def json(self) -> dict[str, Any]:
         return self.response
+
+
+@pytest.fixture
+def mock_api_received_invalid_json(monkeypatch: MonkeyPatch):
+    def returnInvalid(*args: Any, **kwargs: Any) -> MockResponse:
+        return MockResponse(
+            {
+                "Invalid": "This object does not match the schema and cannot be validated"
+            }
+        )
+
+    monkeypatch.setattr(requests, "get", returnInvalid)
 
 
 @pytest.fixture
@@ -110,9 +123,25 @@ def mock_empty_response(monkeypatch: MonkeyPatch):
     monkeypatch.setattr(requests, "get", returnEmpty)
 
 
+
+def test_fetchNotamsByLatLong_invalid_json(
+    mock_api_received_invalid_json: None,
+):
+    """Test that an invalid schema from the API raises validation error"""
+    notam_fetcher = NotamFetcher("CLIENT_ID", "CLIENT_SECRET")
+
+
+    with pytest.raises(NotamFetcherValidationError) as e:
+        notam_fetcher.fetchNotamsByLatLong(32, 32, 10)
+    
+    assert(e.value.invalid_object.get("Invalid")=="This object does not match the schema and cannot be validated")
+
+
+
 def test_fetchNotamsByLatLong_one_unexpected_response(
     mock_one_unexpected_response: None,
 ):
+    """Test that fetchNotamsByLatLong filters a non-notam object in the NOTAMs API response"""
     notam_fetcher = NotamFetcher("CLIENT_ID", "CLIENT_SECRET")
     notams = notam_fetcher.fetchNotamsByLatLong(32, 32, 10)
     assert len(notams) == 1
@@ -120,18 +149,21 @@ def test_fetchNotamsByLatLong_one_unexpected_response(
 
 
 def test_fetchNotamsByLatLong_unexpected_response(mock_unexpected_response: None):
+    """Test that fetchNotamsByLatLong filters a non-notam object in the NOTAMs API response"""
     notam_fetcher = NotamFetcher("CLIENT_ID", "CLIENT_SECRET")
     notams = notam_fetcher.fetchNotamsByLatLong(32, 32, 10)
     assert len(notams) == 0
 
 
 def test_fetchNotamsByLatLong_no_notams(mock_empty_response: None):
+    """Test that fetchNotamsByLatLong handles the case where API returns no NOTAMs"""
     notam_fetcher = NotamFetcher("CLIENT_ID", "CLIENT_SECRET")
     notams = notam_fetcher.fetchNotamsByLatLong(32, 32, 10)
     assert len(notams) == 0
 
 
 def test_fetchNotamsByAirportCode_no_notams(mock_empty_response: None):
+    """Test that fetchNotamsByAirportCode handles the case where API returns no NOTAMs"""
     notam_fetcher = NotamFetcher("CLIENT_ID", "CLIENT_SECRET")
     notams = notam_fetcher.fetchNotamsByAirportcode("LAX")
     assert len(notams) == 0
